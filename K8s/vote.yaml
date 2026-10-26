@@ -1,0 +1,27 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: vote-bhaumik
+spec:
+  replicas: 2
+  selector:
+    matchLabels: { app: vote-bhaumik }
+  template:
+    metadata:
+      labels: { app: vote-bhaumik }
+    spec:
+      containers:
+        - name: vote
+          image: bhaumik972412/vote-bhaumik:latest
+          ports: [{ containerPort: 80 }]
+          env:
+            - name: REDIS_HOST
+              value: redis-bhaumik
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: vote-service-bhaumik
+spec:
+  selector: { app: vote-bhaumik }
+  ports: [{ port: 80, targetPort: 80 }]

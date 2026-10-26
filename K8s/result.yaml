@@ -1,0 +1,31 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: result-bhaumik
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: result-bhaumik }
+  template:
+    metadata:
+      labels: { app: result-bhaumik }
+    spec:
+      containers:
+        - name: result
+          image: bhaumik972412/result-bhaumik:latest
+          ports: [{ containerPort: 80 }]
+          env:
+            - name: PG_HOST
+              value: db-bhaumik
+            - name: PG_USER
+              valueFrom: { secretKeyRef: { name: db-credentials-bhaumik, key: POSTGRES_USER } }
+            - name: PG_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-credentials-bhaumik, key: POSTGRES_PASSWORD } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: result-service-bhaumik
+spec:
+  selector: { app: result-bhaumik }
+  ports: [{ port: 80, targetPort: 80 }]

@@ -1,0 +1,29 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: db-bhaumik
+spec:
+  replicas: 1
+  selector:
+    matchLabels: { app: db-bhaumik }
+  template:
+    metadata:
+      labels: { app: db-bhaumik }
+    spec:
+      containers:
+        - name: postgres
+          image: postgres:15-alpine
+          ports: [{ containerPort: 5432 }]
+          env:
+            - name: POSTGRES_USER
+              valueFrom: { secretKeyRef: { name: db-credentials-bhaumik, key: POSTGRES_USER } }
+            - name: POSTGRES_PASSWORD
+              valueFrom: { secretKeyRef: { name: db-credentials-bhaumik, key: POSTGRES_PASSWORD } }
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: db-bhaumik
+spec:
+  selector: { app: db-bhaumik }
+  ports: [{ port: 5432, targetPort: 5432 }]
