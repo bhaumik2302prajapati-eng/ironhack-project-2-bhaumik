@@ -1,157 +1,258 @@
-<!-- © 2024 | Ironhack -->
+# 🐱🐶 Cats vs Dogs on AWS EKS: a multi-service voting app with CI/CD
+
+A multi-stack voting application deployed on **Amazon EKS (Kubernetes)** in **us-east-1**, exposed through an **NGINX Ingress**, and delivered automatically by a **GitHub Actions** pipeline.
+
+This is my fork of [Pokfinner/ironhack-project-1](https://github.com/Pokfinner/ironhack-project-1), completed as a DevOps project by **Bhaumik**. Every cloud and Kubernetes resource I created carries `-bhaumik` in its name so it is unique.
 
 ---
 
-# Multi-Stack Voting Application
+## 🧭 Architecture
 
-**Welcome to your DevOps practice project!** This repository hosts a multi-stack voting application composed of several services, each implemented in a different language and technology stack. The goal is to help you gain experience with containerization, orchestration, and running a distributed set of services—both individually and as part of a unified system.
+```
+                        ┌───────────────────────────── AWS (us-east-1) ─────────────────────────────┐
+                        │                      EKS cluster: voting-app-cluster-bhaumik              │
+ User ──► AWS Load      │   NGINX Ingress                                                           │
+          Balancer ─────┼──► /vote/   ──► vote-service-bhaumik   ──► vote (Python Flask) ──┐        │
+                        │    /result/ ──► result-service-bhaumik ──► result (Node.js)      │        │
+                        │                                              ▲                   ▼        │
+                        │                                              │            redis-bhaumik   │
+                        │                                      db-bhaumik (Postgres)       │        │
+                        │                                              ▲                   ▼        │
+                        │                                              └──────── worker (.NET) ◄────┘
+                        └───────────────────────────────────────────────────────────────────────────┘
+```
 
-This application, while simple, uses multiple components commonly found in modern distributed architectures, giving you hands-on practice in connecting services, handling containers, and working with basic infrastructure automation.
+**Flow of one vote:** vote page → Redis queue → worker → Postgres → result page (live updates through socket.io).
 
-## Application Overview
-
-The voting application includes:
-
-- **Vote (Python)**: A Python Flask-based web application where users can vote between two options.
-- **Redis (in-memory queue)**: Collects incoming votes and temporarily stores them.
-- **Worker (.NET)**: A .NET 10-based service that consumes votes from Redis and persists them into a database.
-- **Postgres (Database)**: Stores votes for long-term persistence.
-- **Result (Node.js)**: A Node.js/Express web application that displays the vote counts in real time.
-
-### Why This Setup?
-
-The goal is to introduce you to a variety of languages, tools, and frameworks in one place. This is **not** a perfect production design. Instead, it’s intentionally diverse to help you:
-
-- Work with multiple runtimes and languages (Python, Node.js, .NET).
-- Interact with services like Redis and Postgres.
-- Containerize applications using Docker.
-- Use Docker Compose to orchestrate and manage multiple services together.
-
-By dealing with this “messy” environment, you’ll build real-world problem-solving skills. After this project, you should feel more confident tackling more complex deployments and troubleshooting issues in containerized, multi-service setups.
-
----
-
-## How to Run Each Component
-
-### Running the Vote Service (Python) Locally (No Docker)
-
-1. Ensure you have Python 3.15 installed (the version the Docker image uses).
-2. Navigate to the `vote` directory:
-   ```bash
-   cd vote
-   pip install -r requirements.txt
-   PORT=8000 python app.py
-   ```
-   Access the vote interface at [http://localhost:8000](http://localhost:8000). The app listens on port 80 unless `PORT` is set, and on Linux ports below 1024 normally need root.
-
-### Running Redis Locally (No Docker)
-
-1. Install Redis on your system ([https://redis.io/docs/getting-started/](https://redis.io/docs/getting-started/)).
-2. Start Redis:
-   ```bash
-   redis-server
-   ```
-   Redis will be available at `localhost:6379`.
-
-### Running the Worker (C#/.NET) Locally (No Docker)
-
-1. Ensure the .NET 10 SDK is installed (the version the Docker image uses).
-2. Navigate to `worker`:
-   ```bash
-   cd worker
-   dotnet restore
-   dotnet run
-   ```
-   The worker will attempt to connect to Redis and Postgres when available.
-
-### Running Postgres Locally (No Docker)
-
-1. Install Postgres from [https://www.postgresql.org/download/](https://www.postgresql.org/download/).
-2. Start Postgres, note the username and password (default `postgres`/`postgres`):
-   ```bash
-   # On many systems, Postgres runs as a service once installed.
-   ```
-   Postgres will be available at `localhost:5432`.
-
-### Running the Result Service (Node.js) Locally (No Docker)
-
-1. Ensure Node.js 18+ is installed.
-2. Navigate to `result`:
-   ```bash
-   cd result
-   npm install
-   node server.js
-   ```
-   Access the results interface at [http://localhost:4000](http://localhost:4000).
-
-**Note:** To get the entire system working end-to-end (i.e., votes flowing through Redis, processed by the worker, stored in Postgres, and displayed by the result app), you’ll need to ensure each component is running and that connection strings or environment variables point to the correct services.
+| Service | Tech | Role |
+|---|---|---|
+| `vote` | Python Flask | Web page where users vote Cats or Dogs |
+| `redis` | Redis (alpine) | In-memory queue that buffers new votes |
+| `worker` | .NET 7 | Moves votes from Redis into Postgres |
+| `db` | PostgreSQL 15 (alpine) | Permanent storage of votes |
+| `result` | Node.js / Express | Live scoreboard |
 
 ---
 
-## Running the Entire Stack in Docker
+## 🛠️ Tech stack and why each piece is used
 
-### Building and Running Individual Services
+| Tool | Why |
+|---|---|
+| **Docker** | Packages each service with its dependencies so it runs identically everywhere |
+| **Docker Hub** | Registry from which the cluster pulls the images |
+| **Amazon EKS** | Managed Kubernetes: AWS runs the control plane, I manage the worker nodes |
+| **eksctl** | Creates the cluster, VPC, subnets and node group from one config file |
+| **Kubernetes** | Self-healing, scaling, service discovery and rolling updates |
+| **NGINX Ingress (Helm)** | One load balancer routing URL paths to the right service |
+| **Kubernetes Secret** | Keeps database credentials out of Git |
+| **GitHub Actions** | Builds, publishes and deploys on every push to `main` |
 
-You can build each service with Docker and run them individually:
+---
 
-- **Vote (Python)**:
-  ```bash
-  docker build -t myorg/vote:latest ./vote
-  docker run --name vote -p 8080:80 myorg/vote:latest
-  ```
-  Visit [http://localhost:8080](http://localhost:8080).
+## 📁 Repository structure
 
-- **Redis** (official image, no build needed):
-  ```bash
-  docker run --name redis -p 6379:6379 redis:alpine
-  ```
+```
+.
+├── vote/                  # Python Flask app + Dockerfile
+├── result/                # Node.js app + Dockerfile
+├── worker/                # .NET worker + Dockerfile
+├── healthchecks/          # health check scripts (from the original repo)
+├── docker-compose.yml     # local development stack
+├── cluster.yaml           # eksctl cluster definition
+├── K8s/
+│   ├── redis.yaml         # Redis Deployment + Service
+│   ├── postgres.yaml      # Postgres Deployment + Service
+│   ├── vote.yaml          # Vote Deployment (2 replicas) + Service
+│   ├── result.yaml        # Result Deployment + Service
+│   ├── worker.yaml        # Worker Deployment (no Service needed)
+│   └── ingress.yaml       # Ingress rules (3 resources)
+└── .github/workflows/
+    └── ci-cd-pipeline.yml # build, push and deploy pipeline
+```
 
-- **Worker (.NET)**:
-  ```bash
-  docker build -t myorg/worker:latest ./worker
-  docker run --name worker myorg/worker:latest
-  ```
-  
-- **Postgres**:
-  ```bash
-  docker run --name db -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=postgres -p 5432:5432 postgres:18-alpine
-  ```
+---
 
-- **Result (Node.js)**:
-  ```bash
-  docker build -t myorg/result:latest ./result
-  docker run --name result -p 8081:80 myorg/result:latest
-  ```
-  Visit [http://localhost:8081](http://localhost:8081).
+## ✅ Prerequisites
 
-### Using Docker Compose
+- AWS account, an IAM user with CLI access keys, region `us-east-1`
+- Installed: AWS CLI v2, `eksctl`, `kubectl`, `helm`, Docker, `git`
+- Docker Hub account and an access token
+- A fork of this repository
 
-Before the first start, create a file named `.env` next to `docker-compose.yml` with one line, `DB_PASSWORD=` followed by a password of your choice (letters and digits only). Save it as plain text with exactly that name. Do not commit this file. Compose will not start without it, and to change the password later run `docker compose down -v` first.
+---
 
-The easiest way to run the entire stack is via Docker Compose. From the project root directory:
+## 🚀 Deployment guide
+
+### 1. Run locally first (optional sanity check)
 
 ```bash
 docker compose up
+# vote:   http://localhost:8080
+# result: http://localhost:8081
 ```
 
-This will:
-
-- Pull the prebuilt `pokfinner/vote`, `pokfinner/result` and `pokfinner/worker` images and run them. To run your own code instead, uncomment the `build:` lines in `docker-compose.yml`, indent them to line up with `image:`, and start with `docker compose up --build`.
-- Run Redis and Postgres from their official images.
-- Set up networks, volumes, and environment variables so all services can communicate.
-
-Visit [http://localhost:8080](http://localhost:8080) to vote and [http://localhost:8081](http://localhost:8081) to see results.
-
----
-
-## Notes on Platforms (arm64 vs amd64)
-
-If you’re on an arm64 machine (e.g., Apple Silicon M1/M2) and encounter issues with images or dependencies that assume amd64, you can use Docker `buildx`:
+### 2. Create the EKS cluster
 
 ```bash
-docker buildx build --platform linux/amd64 -t myorg/worker:latest ./worker
+aws configure                      # region: us-east-1
+eksctl create cluster -f cluster.yaml
+kubectl get nodes                  # expect 2 nodes in Ready state
 ```
 
-This ensures the image is built for the desired platform.
+`cluster.yaml` creates `voting-app-cluster-bhaumik` with the managed node group `voting-nodes-bhaumik` (2 × `t3.medium`).
+
+### 3. Build and push the images
+
+The pipeline does this automatically; to do it by hand:
+
+```bash
+docker login
+docker buildx build --platform linux/amd64 -t <DOCKERHUB_USER>/vote-bhaumik:latest   --push ./vote
+docker buildx build --platform linux/amd64 -t <DOCKERHUB_USER>/result-bhaumik:latest --push ./result
+docker buildx build --platform linux/amd64 -t <DOCKERHUB_USER>/worker-bhaumik:latest --push ./worker
+```
+
+Use `--platform linux/amd64`: the EKS nodes are x86, and images built on Apple Silicon would fail with `exec format error`.
+
+### 4. Create the database secret
+
+The password is **not** stored in the repository. Create it once in the cluster:
+
+```bash
+kubectl create secret generic db-credentials-bhaumik \
+  --from-literal=POSTGRES_USER=postgres \
+  --from-literal=POSTGRES_PASSWORD='<your-password>'
+```
+
+### 5. Deploy the application
+
+```bash
+kubectl apply -f K8s/
+kubectl get pods
+```
+
+The apps read their configuration from environment variables:
+
+| App | Variables |
+|---|---|
+| vote | `REDIS_HOST` |
+| worker | `REDIS_HOST`, `DB_HOST`, `DB_USERNAME`, `DB_PASSWORD` |
+| result | `PG_HOST`, `PG_USER`, `PG_PASSWORD` |
+
+### 6. Install the NGINX Ingress controller
+
+```bash
+helm repo add ingress-nginx https://kubernetes.github.io/ingress-nginx
+helm repo update
+helm install my-nginx-bhaumik ingress-nginx/ingress-nginx \
+  --namespace ingress-nginx --create-namespace
+
+kubectl apply -f K8s/ingress.yaml
+kubectl get svc -n ingress-nginx     # copy the EXTERNAL-IP hostname
+```
+
+### 7. Open the app
+
+```
+http://<LOAD_BALANCER_HOSTNAME>/vote/
+http://<LOAD_BALANCER_HOSTNAME>/result/
+```
+
+Keep the trailing slash. DNS for a new load balancer can take a few minutes to propagate.
 
 ---
+
+## 🌐 Ingress routing
+
+| Path | Goes to | Why |
+|---|---|---|
+| `/vote/` | vote service | Prefix is stripped before forwarding |
+| `/result/` | result service | Prefix is stripped before forwarding |
+| `/vote/static/...` | vote service | The vote app serves its own static files under this path, so no rewrite |
+| `/result/socket.io/...` | result service | The result app uses a custom socket.io path, so no rewrite; long timeouts keep the live connection open |
+
+---
+
+## 🤖 CI/CD pipeline
+
+File: `.github/workflows/ci-cd-pipeline.yml`. It runs on every push to `main`.
+
+1. **build-and-push**: builds `vote`, `result` and `worker` in parallel and pushes each image to Docker Hub with two tags: `latest` and the commit SHA.
+2. **deploy**: configures AWS credentials, runs `aws eks update-kubeconfig`, applies `K8s/`, sets each Deployment to the image of the current commit, and waits for the rollout to finish.
+
+Using the commit SHA as the tag guarantees that Kubernetes rolls out new pods for every change and makes it clear which code is running.
+
+**GitHub repository secrets required** (Settings → Secrets and variables → Actions):
+
+| Secret | Value |
+|---|---|
+| `DOCKERHUB_USERNAME` | Docker Hub username |
+| `DOCKERHUB_TOKEN` | Docker Hub access token |
+| `AWS_ACCESS_KEY_ID` | Access key of the IAM user that created the cluster |
+| `AWS_SECRET_ACCESS_KEY` | Matching secret key |
+
+---
+
+## 🔎 Verifying the deployment
+
+```bash
+kubectl get deployments
+kubectl get pods
+kubectl get svc
+kubectl get ingress
+kubectl logs deploy/worker-bhaumik --tail=10    # shows "Processing vote for ..."
+kubectl logs deploy/result-bhaumik --tail=10    # shows "Connected to db"
+```
+
+To prove the pipeline works: change the heading text in `vote/`, push to `main`, watch the Actions run turn green, then hard-refresh `/vote/`.
+
+---
+
+## 🐛 Problems I solved
+
+| Problem | Symptom | Cause and fix |
+|---|---|---|
+| Invalid image name | `InvalidImageName` on pods | A `<DOCKERHUB_USER>` placeholder was left in the YAML; replaced it with the real username |
+| Wrong environment variables | `getaddrinfo ENOTFOUND db` in the result logs | The apps read `PG_HOST` and `DB_HOST`, not the names I first guessed; found the right names by reading the code |
+| Missing static files | Vote page unstyled | The app serves files under `/vote/static`; added an Ingress rule without the path rewrite |
+| Blank result page | `404` on `/socket.io` | The app uses the custom path `/result/socket.io`; added a dedicated Ingress rule |
+| Startup order | `relation "votes" does not exist` | The worker creates the table; the result app recovered once the worker had connected |
+| Kerberos warning | `libgssapi_krb5.so.2` message in worker logs | Harmless: the .NET driver falls back to password authentication |
+
+---
+
+## ⚠️ Known limitations
+
+- **Postgres has no persistent volume**: votes are lost if the database pod restarts.
+- The application code falls back to default credentials if variables are not set; the manifests always supply them from the Secret.
+- The pipeline uses long-lived AWS access keys.
+- The site is served over HTTP only.
+
+## 🚀 Future improvements
+
+- Persistent storage for Postgres (StatefulSet with an EBS volume)
+- HTTPS with cert-manager, Let’s Encrypt and Route 53
+- GitHub OIDC for AWS authentication instead of access keys
+- Horizontal Pod Autoscaler, plus readiness and liveness probes
+- Infrastructure as code with Terraform
+- Monitoring and alerting with Prometheus and Grafana
+
+---
+
+## 🧹 Cleanup (avoid AWS charges)
+
+Remove the Ingress and controller **before** deleting the cluster, so AWS removes the load balancer:
+
+```bash
+kubectl delete -f K8s/ingress.yaml
+helm uninstall my-nginx-bhaumik -n ingress-nginx
+eksctl delete cluster -f cluster.yaml
+```
+
+Then check EC2 → Load Balancers, VPC and CloudFormation in `us-east-1` for leftovers, delete the IAM access key used for the project, and remove the AWS secrets from GitHub.
+
+---
+
+## 📜 License and credits
+
+Original project: [Pokfinner/ironhack-project-1](https://github.com/Pokfinner/ironhack-project-1), licensed under Apache-2.0. Kubernetes manifests, cluster configuration, CI/CD pipeline and documentation by Bhaumik.
